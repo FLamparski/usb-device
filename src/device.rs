@@ -152,19 +152,11 @@ impl<B: UsbBus> UsbDevice<B> {
         match pr {
             PollResult::None => { }
             PollResult::Reset => self.reset(classes),
-            PollResult::Data { ep_out, ep_in_complete, ep_setup } => {
-                // Combine bit fields for quick tests
-                let mut eps = ep_out | ep_in_complete | ep_setup;
-
+            PollResult::Data { mut ep_out, mut ep_in_complete } => {
                 // Pending events for endpoint 0?
-                if (eps & 1) != 0 {
-                    let req = if (ep_setup & 1) != 0 {
-                        self.control.handle_setup()
-                    } else if (ep_out & 1) != 0 {
-                        self.control.handle_out()
-                    } else {
-                        None
-                    };
+
+                if (ep_out & 1) != 0 {
+                    let req = self.control.handle_out();
 
                     match req {
                         Some(req) if req.direction == UsbDirection::In
@@ -174,55 +166,52 @@ impl<B: UsbBus> UsbDevice<B> {
                         _ => (),
                     };
 
-                    if (ep_in_complete & 1) != 0 {
-                        let completed = self.control.handle_in_complete();
+                    ep_out &= !1;
+                }
 
-                        if !B::QUIRK_SET_ADDRESS_BEFORE_STATUS {
-                            if completed && self.pending_address != 0 {
-                                self.bus.set_device_address(self.pending_address);
-                                self.pending_address = 0;
+                if (ep_in_complete & 1) != 0 {
+                    let completed = self.control.handle_in_complete();
 
-                                self.device_state = UsbDeviceState::Addressed;
-                            }
+                    if !B::QUIRK_SET_ADDRESS_BEFORE_STATUS {
+                        if completed && self.pending_address != 0 {
+                            self.bus.set_device_address(self.pending_address);
+                            self.pending_address = 0;
+
+                            self.device_state = UsbDeviceState::Addressed;
                         }
                     }
 
-                    eps &= !1;
+                    ep_in_complete &= !1;
                 }
 
                 // Pending events for other endpoints?
-                if eps != 0 {
-                    let mut bit = 2u16;
 
-                    for i in 1..MAX_ENDPOINTS {
-                        if (ep_setup & bit) != 0 {
-                            for cls in classes.iter_mut() {
-                                cls.endpoint_setup(
-                                    EndpointAddress::from_parts(i as u8, UsbDirection::Out));
-                            }
-                        } else if (ep_out & bit) != 0 {
-                            for cls in classes.iter_mut() {
-                                cls.endpoint_out(
-                                    EndpointAddress::from_parts(i as u8, UsbDirection::Out));
-                            }
+                let mut bit = 2u16;
+
+                for i in 1..MAX_ENDPOINTS {
+                    if (ep_out & bit) != 0 {
+                        for cls in classes.iter_mut() {
+                            cls.endpoint_out(
+                                EndpointAddress::from_parts(i as u8, UsbDirection::Out));
                         }
-
-                        if (ep_in_complete & bit) != 0 {
-                            for cls in classes.iter_mut() {
-                                cls.endpoint_in_complete(
-                                    EndpointAddress::from_parts(i as u8, UsbDirection::In));
-                            }
-                        }
-
-                        eps &= !bit;
-
-                        if eps == 0 {
-                            // No more pending events for higher endpoints
-                            break;
-                        }
-
-                        bit <<= 1;
                     }
+
+                    if (ep_in_complete & bit) != 0 {
+                        for cls in classes.iter_mut() {
+                            cls.endpoint_in_complete(
+                                EndpointAddress::from_parts(i as u8, UsbDirection::In));
+                        }
+                    }
+
+                    ep_out &= !bit;
+                    ep_in_complete &= !bit;
+
+                    if ep_out == 0 && ep_in_complete == 0 {
+                        // No more pending events for higher endpoints
+                        break;
+                    }
+
+                    bit <<= 1;
                 }
 
                 for cls in classes.iter_mut() {
