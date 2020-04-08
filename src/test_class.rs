@@ -8,13 +8,13 @@ use crate::descriptor;
 
 /// Test USB class for testing USB driver implementations. Supports various endpoint types and
 /// requests for testing USB peripheral drivers on actual hardware.
-pub struct TestClass<B: UsbBus> {
+pub struct TestClass<U: UsbCore> {
     custom_string: StringIndex,
     iface: InterfaceNumber,
-    ep_bulk_in: B::EndpointIn,
-    ep_bulk_out: B::EndpointOut,
-    ep_interrupt_in: B::EndpointIn,
-    ep_interrupt_out: B::EndpointOut,
+    ep_bulk_in: U::EndpointIn,
+    ep_bulk_out: U::EndpointOut,
+    ep_interrupt_in: U::EndpointIn,
+    ep_interrupt_out: U::EndpointOut,
     control_buf: [u8; 256],
     bulk_buf: [u8; 256],
     interrupt_buf: [u8; 256],
@@ -43,9 +43,9 @@ pub const REQ_UNKNOWN: u8 = 42;
 
 pub const LONG_DATA: &'static [u8] = &[0x17; 257];
 
-impl<B: UsbBus> TestClass<B> {
+impl<U: UsbCore> TestClass<U> {
     /// Creates a new TestClass.
-    pub fn new(alloc: &mut UsbAllocator<B>) -> TestClass<B> {
+    pub fn new(alloc: &mut UsbAllocator<U>) -> TestClass<U> {
         TestClass {
             custom_string: alloc.string(),
             iface: alloc.interface(),
@@ -67,7 +67,7 @@ impl<B: UsbBus> TestClass<B> {
     }
 
     /// Convenience method to create a UsbDevice that is configured correctly for TestClass.
-    pub fn make_device(&self, usb_bus: UsbAllocator<B>) -> UsbDevice<B> {
+    pub fn make_device(&self, usb_bus: UsbAllocator<U>) -> UsbDevice<U> {
         UsbDeviceBuilder::new(usb_bus, UsbVidPid(VID, PID))
             .manufacturer(MANUFACTURER)
             .product(PRODUCT)
@@ -152,7 +152,7 @@ impl<B: UsbBus> TestClass<B> {
     }
 }
 
-impl<B: UsbBus> UsbClass<B> for TestClass<B> {
+impl<U: UsbCore> UsbClass<U> for TestClass<U> {
     fn reset(&mut self) {
         self.len = 0;
         self.i = 0;
@@ -218,7 +218,7 @@ impl<B: UsbBus> UsbClass<B> for TestClass<B> {
         }
     }
 
-    fn control_in(&mut self, xfer: ControlIn<B>) {
+    fn control_in(&mut self, xfer: ControlIn<U>) {
         let req = *xfer.request();
 
         if !(req.request_type == control::RequestType::Vendor
@@ -238,7 +238,7 @@ impl<B: UsbBus> UsbClass<B> for TestClass<B> {
         }
     }
 
-    fn control_out(&mut self, xfer: ControlOut<B>) {
+    fn control_out(&mut self, xfer: ControlOut<U>) {
         let req = *xfer.request();
 
         if !(req.request_type == control::RequestType::Vendor
