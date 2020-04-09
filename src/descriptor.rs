@@ -185,7 +185,7 @@ impl ConfigurationDescriptorWriter<'_> {
 
     fn write_interface(
         &mut self,
-        interface: &InterfaceHandle,
+        interface_number: u8,
         descriptor: &InterfaceDescriptor,
     ) -> Result<()> {
         self.num_endpoints_mark = Some(self.writer.pos() + 4);
@@ -193,7 +193,7 @@ impl ConfigurationDescriptorWriter<'_> {
         self.writer.write(
             descriptor_type::INTERFACE,
             &[
-                interface.into(),     // bInterfaceNumber
+                interface_number,     // bInterfaceNumber
                 self.alt_setting,     // bAlternateSetting
                 0,                    // bNumEndpoints
                 descriptor.class,     // bInterfaceClass
@@ -257,18 +257,18 @@ impl<U: UsbCore> ConfigVisitor<U> for ConfigurationDescriptorWriter<'_> {
 
         self.alt_setting = 0;
         self.num_endpoints_mark = Some(self.writer.pos() + 4);
-        self.write_interface(interface, descriptor)?;
+        self.write_interface(interface.into(), descriptor)?;
 
         Ok(())
     }
 
     fn next_alt_setting(
         &mut self,
-        interface: &mut InterfaceHandle,
+        interface_number: u8,
         descriptor: &InterfaceDescriptor,
     ) -> Result<()> {
         self.alt_setting += 1;
-        self.write_interface(interface, descriptor)?;
+        self.write_interface(interface_number, descriptor)?;
 
         Ok(())
     }
