@@ -605,7 +605,7 @@ impl<U: UsbCore> ConfigVisitor<U> for EnableEndpointVisitor {
     ) -> Result<()> {
         self.interface_match = self
             .interface
-            .map(|i| i == interface.into())
+            .map(|i| i == *interface)
             .unwrap_or(true);
 
         self.current_alt = 0;
