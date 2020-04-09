@@ -11,6 +11,7 @@ use core::cmp;
 pub struct TestClass<U: UsbCore> {
     custom_string: StringHandle,
     iface: InterfaceHandle,
+    iface_name: StringHandle,
     ep_bulk_in: EndpointIn<U>,
     ep_bulk_out: EndpointOut<U>,
     ep_interrupt_in: EndpointIn<U>,
@@ -49,6 +50,7 @@ impl<U: UsbCore> TestClass<U> {
         TestClass {
             custom_string: StringHandle::new(),
             iface: InterfaceHandle::new(),
+            iface_name: StringHandle::new(),
             ep_bulk_in: EndpointConfig::bulk(64).into(),
             ep_bulk_out: EndpointConfig::bulk(64).into(),
             ep_interrupt_in: EndpointConfig::interrupt(31, 1).into(),
@@ -169,14 +171,12 @@ impl<U: UsbCore> TestClass<U> {
 impl<U: UsbCore> UsbClass<U> for TestClass<U> {
     fn configure(&mut self, mut config: Config<U>) -> Result<()> {
         config.string(&mut self.custom_string)?;
+        config.string(&mut self.iface_name)?;
 
         config
             .interface(
                 &mut self.iface,
-                InterfaceDescriptor {
-                    class: 0xff,
-                    ..Default::default()
-                },
+                InterfaceDescriptor::class(0xff).name(&self.iface_name)
             )?
             .endpoint_in(&mut self.ep_bulk_in)?
             .endpoint_out(&mut self.ep_bulk_out)?
@@ -199,6 +199,8 @@ impl<U: UsbCore> UsbClass<U> for TestClass<U> {
     fn get_string(&self, index: StringHandle, lang_id: u16) -> Option<&str> {
         if index == self.custom_string && lang_id == descriptor::lang_id::ENGLISH_US {
             Some(CUSTOM_STRING)
+        } else  if index == self.iface_name && lang_id == descriptor::lang_id::ENGLISH_US {
+            Some("Test Interface")
         } else {
             None
         }
