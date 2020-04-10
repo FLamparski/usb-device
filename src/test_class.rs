@@ -10,7 +10,7 @@ use core::cmp;
 pub struct TestClass<U: UsbCore> {
     custom_string: StringHandle,
     iface: InterfaceHandle,
-    iface_name: StringHandle,
+    iface_description: StringHandle,
     ep_bulk_in: EndpointIn<U>,
     ep_bulk_out: EndpointOut<U>,
     ep_interrupt_in: EndpointIn<U>,
@@ -33,7 +33,7 @@ pub const MANUFACTURER: &'static str = "TestClass Manufacturer";
 pub const PRODUCT: &'static str = "virkkunen.net usb-device TestClass";
 pub const SERIAL_NUMBER: &'static str = "TestClass Serial";
 pub const CUSTOM_STRING: &'static str = "TestClass Custom String";
-pub const INTERFACE_NAME: &'static str = "Test Interface";
+pub const INTERFACE_DESCRIPTION: &'static str = "Test Interface";
 
 pub const REQ_STORE_REQUEST: u8 = 1;
 pub const REQ_READ_BUFFER: u8 = 2;
@@ -50,7 +50,7 @@ impl<U: UsbCore> TestClass<U> {
         TestClass {
             custom_string: StringHandle::new(),
             iface: InterfaceHandle::new(),
-            iface_name: StringHandle::new(),
+            iface_description: StringHandle::new(),
             ep_bulk_in: EndpointConfig::bulk(64).into(),
             ep_bulk_out: EndpointConfig::bulk(64).into(),
             ep_interrupt_in: EndpointConfig::interrupt(31, 1).into(),
@@ -171,12 +171,13 @@ impl<U: UsbCore> TestClass<U> {
 impl<U: UsbCore> UsbClass<U> for TestClass<U> {
     fn configure(&mut self, mut config: Config<U>) -> Result<()> {
         config.string(&mut self.custom_string, CUSTOM_STRING)?;
-        config.string(&mut self.iface_name, INTERFACE_NAME)?;
+
+        config.string(&mut self.iface_description, INTERFACE_DESCRIPTION)?;
 
         config
             .interface(
                 &mut self.iface,
-                InterfaceDescriptor::class(0xff).name(&self.iface_name)
+                InterfaceDescriptor::class(0xff).description(&self.iface_description)
             )?
             .endpoint_in(&mut self.ep_bulk_in)?
             .endpoint_out(&mut self.ep_bulk_out)?
@@ -195,16 +196,6 @@ impl<U: UsbCore> UsbClass<U> for TestClass<U> {
         self.expect_interrupt_in_complete = false;
         self.expect_interrupt_out = false;
     }
-
-    /*fn get_string(&self, index: StringHandle, lang_id: u16) -> Option<&str> {
-        if index == self.custom_string && lang_id == descriptor::lang_id::ENGLISH_US {
-            Some(CUSTOM_STRING)
-        } else  if index == self.iface_name && lang_id == descriptor::lang_id::ENGLISH_US {
-            Some("Test Interface")
-        } else {
-            None
-        }
-    }*/
 
     fn endpoint_in_complete(&mut self, eps: EndpointInSet) {
         if self.bench {
