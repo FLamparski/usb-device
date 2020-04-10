@@ -147,104 +147,100 @@ impl<U: UsbCore> UsbDevice<U> {
     ///
     /// Strictly speaking the list of classes is allowed to change between polls if the device has
     /// been reset, which is indicated by `state` being equal to [`UsbDeviceState::Default`].
-    pub fn poll(&mut self, classes: &mut ClassList<'_, U>) -> bool {
+    pub fn poll(&mut self, classes: &mut ClassList<'_, U>) -> Result<()> {
         let pr = self.bus.poll();
 
         if self.device_state == UsbDeviceState::Suspend {
             match pr {
-                PollResult::Suspend | PollResult::None => {
-                    return false;
+                Ok(PollResult::Suspend) | Err(UsbError::WouldBlock) => {
+                    return Err(UsbError::WouldBlock);
                 }
+
                 _ => {
-                    self.bus.resume();
-                    self.device_state = UsbDeviceState::Default;
+                    self.bus.resume()?;
                 }
             }
         }
 
-        let data_available = match pr {
-            PollResult::None => false,
-            PollResult::Reset => {
-                self.reset(classes);
-                false
-            }
-            PollResult::Data {
-                mut ep_out,
-                mut ep_in_complete,
-            } => {
-                // Pending events for endpoint 0?
-
-                if (ep_out & 1) != 0 {
-                    let req = self.control.handle_out();
-
-                    match req {
-                        Some(req) if req.direction == UsbDirection::In => {
-                            self.control_in(classes, req)
-                        }
-                        Some(req) if req.direction == UsbDirection::Out => {
-                            self.control_out(classes, req)
-                        }
-                        _ => (),
-                    };
-
-                    ep_out &= !1;
+        if let Ok(pr) = &pr {
+            match pr {
+                PollResult::Resume => { /* handled above */ }
+                PollResult::Reset => {
+                    self.reset(classes)?;
                 }
+                PollResult::Data {
+                    mut ep_out,
+                    mut ep_in_complete,
+                } => {
+                    // Pending events for endpoint 0?
 
-                if (ep_in_complete & 1) != 0 {
-                    let completed = self.control.handle_in_complete();
+                    if (ep_out & 1) != 0 {
+                        let req = self.control.handle_out()?;
 
-                    if !U::QUIRK_SET_ADDRESS_BEFORE_STATUS {
-                        if completed && self.pending_address != 0 {
-                            self.bus.set_device_address(self.pending_address);
-                            self.pending_address = 0;
+                        match req {
+                            Some(req) if req.direction == UsbDirection::In => {
+                                self.control_in(classes, req)?
+                            }
+                            Some(req) if req.direction == UsbDirection::Out => {
+                                self.control_out(classes, req)?
+                            }
+                            _ => (),
+                        };
 
-                            self.device_state = UsbDeviceState::Addressed;
+                        ep_out &= !1;
+                    }
+
+                    if (ep_in_complete & 1) != 0 {
+                        let completed = self.control.handle_in_complete()?;
+
+                        if !U::QUIRK_SET_ADDRESS_BEFORE_STATUS {
+                            if completed && self.pending_address != 0 {
+                                self.bus.set_device_address(self.pending_address)?;
+                                self.pending_address = 0;
+
+                                self.device_state = UsbDeviceState::Addressed;
+                            }
+                        }
+
+                        ep_in_complete &= !1;
+                    }
+
+                    // Pending events for other endpoints?
+
+                    if ep_out != 0 {
+                        for cls in classes.iter_mut() {
+                            cls.endpoint_out(EndpointOutSet(ep_out));
                         }
                     }
 
-                    ep_in_complete &= !1;
-                }
-
-                // Pending events for other endpoints?
-
-                if ep_out != 0 {
-                    for cls in classes.iter_mut() {
-                        cls.endpoint_out(EndpointOutSet(ep_out));
+                    if ep_in_complete != 0 {
+                        for cls in classes.iter_mut() {
+                            cls.endpoint_in_complete(EndpointInSet(ep_in_complete));
+                        }
                     }
                 }
-
-                if ep_in_complete != 0 {
-                    for cls in classes.iter_mut() {
-                        cls.endpoint_in_complete(EndpointInSet(ep_in_complete));
-                    }
+                PollResult::Suspend => {
+                    self.bus.suspend()?;
+                    self.device_state = UsbDeviceState::Suspend;
                 }
-
-                true
-            }
-            PollResult::Resume => false,
-            PollResult::Suspend => {
-                self.bus.suspend();
-                self.device_state = UsbDeviceState::Suspend;
-
-                false
-            }
-        };
+            };
+        }
 
         for cls in classes.iter_mut() {
             cls.poll(self.device_state);
         }
 
-        data_available
+        pr.map(|_| ())
     }
 
-    fn control_in(&mut self, classes: &mut ClassList<'_, U>, req: control::Request) {
+    fn control_in(&mut self, classes: &mut ClassList<'_, U>, req: control::Request) -> Result<()> {
         use crate::control::{Recipient, Request};
 
         for cls in classes.iter_mut() {
             cls.control_in(ControlIn::new(&mut self.control, &req));
 
             if !self.control.waiting_for_response() {
-                return;
+                return Ok(());
             }
         }
 
@@ -274,7 +270,7 @@ impl<U: UsbCore> UsbDevice<U> {
                     let ep_addr = ((req.index as u8) & 0x8f).into();
 
                     let status: u16 = 0x0000
-                        | if self.bus.is_stalled(ep_addr) {
+                        | if self.bus.is_stalled(ep_addr)? {
                             0x0001
                         } else {
                             0x0000
@@ -316,16 +312,18 @@ impl<U: UsbCore> UsbDevice<U> {
         if self.control.waiting_for_response() {
             self.control.reject().ok();
         }
+
+        Ok(())
     }
 
-    fn control_out(&mut self, classes: &mut ClassList<'_, U>, req: control::Request) {
+    fn control_out(&mut self, classes: &mut ClassList<'_, U>, req: control::Request) -> Result<()> {
         use crate::control::{Recipient, Request};
 
         for cls in classes.iter_mut() {
             cls.control_out(ControlOut::new(&mut self.control, &req));
 
             if !self.control.waiting_for_response() {
-                return;
+                return Ok(());
             }
         }
 
@@ -347,7 +345,7 @@ impl<U: UsbCore> UsbDevice<U> {
 
                 (Recipient::Endpoint, Request::CLEAR_FEATURE, Request::FEATURE_ENDPOINT_HALT) => {
                     self.bus
-                        .set_stalled(((req.index as u8) & 0x8f).into(), false);
+                        .set_stalled(((req.index as u8) & 0x8f).into(), false)?;
                     xfer.accept().ok();
                 }
 
@@ -362,13 +360,13 @@ impl<U: UsbCore> UsbDevice<U> {
 
                 (Recipient::Endpoint, Request::SET_FEATURE, Request::FEATURE_ENDPOINT_HALT) => {
                     self.bus
-                        .set_stalled(((req.index as u8) & 0x8f).into(), true);
+                        .set_stalled(((req.index as u8) & 0x8f).into(), true)?;
                     xfer.accept().ok();
                 }
 
                 (Recipient::Device, Request::SET_ADDRESS, 1..=127) => {
                     if U::QUIRK_SET_ADDRESS_BEFORE_STATUS {
-                        self.bus.set_device_address(req.value as u8);
+                        self.bus.set_device_address(req.value as u8)?;
                         self.device_state = UsbDeviceState::Addressed;
                     } else {
                         self.pending_address = req.value as u8;
@@ -421,16 +419,15 @@ impl<U: UsbCore> UsbDevice<U> {
                     xfer.accept().ok();
                 }
 
-                _ => {
-                    xfer.reject().ok();
-                    return;
-                }
+                _ => { }
             }
         }
 
         if self.control.waiting_for_response() {
             self.control.reject().ok();
         }
+
+        Ok(())
     }
 
     fn get_descriptor(config: &DeviceConfig, classes: &mut ClassList<'_, U>, xfer: ControlIn<U>) {
@@ -513,18 +510,20 @@ impl<U: UsbCore> UsbDevice<U> {
         }
     }
 
-    fn reset(&mut self, classes: &mut ClassList<'_, U>) {
-        self.bus.reset();
+    fn reset(&mut self, classes: &mut ClassList<'_, U>) -> Result<()> {
+        self.bus.reset()?;
 
         self.device_state = UsbDeviceState::Default;
         self.remote_wakeup_enabled = false;
         self.pending_address = 0;
 
-        self.control.reset();
+        self.control.reset()?;
 
         for cls in classes {
             cls.reset();
         }
+
+        Ok(())
     }
 }
 
@@ -561,10 +560,10 @@ impl EnableEndpointVisitor {
                 if self.alt_setting.is_some() {
                     endpoint.enabled = true;
                     unsafe {
-                        endpoint.ep.enable(config);
+                        endpoint.ep.enable(config)?;
                     }
                 } else {
-                    endpoint.ep.disable();
+                    endpoint.ep.disable()?;
                     endpoint.enabled = false;
                 }
             }
