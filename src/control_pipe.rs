@@ -246,8 +246,6 @@ impl<U: UsbCore> ControlPipe<U> {
     fn write_in_chunk(&mut self) -> Result<()> {
         let count = min(self.len - self.i, self.max_packet_size_0 as usize);
 
-        rtt::rprintln!("ctrl will write {} bytes from {} of {}", count, self.i, self.len);
-
         let buffer = self.static_in_buf.unwrap_or(&self.buf);
         match self.ep_in.write_packet(&buffer[self.i..(self.i + count)]) {
             Ok(()) => {  },
