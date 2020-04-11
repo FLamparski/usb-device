@@ -153,10 +153,10 @@ impl<U: UsbCore> ControlPipe<U> {
             }
         };
 
-        /*rtt_target::rprintln!("SETUP {:?} {:?} {:?} req:{} val:{} idx:{} len:{} {:?}",
-        req.direction, req.request_type, req.recipient,
-        req.request, req.value, req.index, req.length,
-        self.state);*/
+        /*rtt::rprintln!("SETUP {:?} {:?} {:?} req:{} val:{} idx:{} len:{} {:?}",
+            req.direction, req.request_type, req.recipient,
+            req.request, req.value, req.index, req.length,
+            self.state);*/
 
         if req.direction == UsbDirection::Out {
             // OUT transfer
@@ -215,13 +215,13 @@ impl<U: UsbCore> ControlPipe<U> {
     pub fn handle_in_complete(&mut self) -> Result<bool> {
         match self.state {
             ControlState::DataIn => {
-                self.write_in_chunk();
+                self.write_in_chunk()?;
             }
             ControlState::DataInZlp => {
-                if self.ep_in.write_packet(&[]).is_err() {
-                    // There isn't much we can do if the write fails, except to wait for another
-                    // poll or for the host to resend the request.
-                    return Ok(false);
+                match self.ep_in.write_packet(&[]) {
+                    Ok(()) => { },
+                    Err(UsbError::WouldBlock) => return Ok(false),
+                    Err(e) => return Err(e),
                 }
 
                 self.state = ControlState::DataInLast;
@@ -243,18 +243,14 @@ impl<U: UsbCore> ControlPipe<U> {
         return Ok(false);
     }
 
-    fn write_in_chunk(&mut self) {
+    fn write_in_chunk(&mut self) -> Result<()> {
         let count = min(self.len - self.i, self.max_packet_size_0 as usize);
 
         let buffer = self.static_in_buf.unwrap_or(&self.buf);
-        if self
-            .ep_in
-            .write_packet(&buffer[self.i..(self.i + count)])
-            .is_err()
-        {
-            // There isn't much we can do if the write fails, except to wait for another poll or for
-            // the host to resend the request.
-            return;
+        match self.ep_in.write_packet(&buffer[self.i..(self.i + count)]) {
+            Ok(()) => {  },
+            Err(UsbError::WouldBlock) => { return Ok(()); },
+            Err(e) => return Err(e),
         };
 
         self.i += count;
@@ -268,6 +264,8 @@ impl<U: UsbCore> ControlPipe<U> {
                 ControlState::DataInLast
             };
         }
+
+        Ok(())
     }
 
     pub fn accept_out(&mut self) -> Result<()> {
@@ -276,7 +274,7 @@ impl<U: UsbCore> ControlPipe<U> {
             _ => return Err(UsbError::InvalidState),
         };
 
-        self.ep_in.write_packet(&[]).ok();
+        self.ep_in.write_packet(&[])?;
         self.state = ControlState::StatusIn;
         Ok(())
     }
@@ -312,7 +310,7 @@ impl<U: UsbCore> ControlPipe<U> {
         self.len = min(data_len, req.length as usize);
         self.i = 0;
         self.state = ControlState::DataIn;
-        self.write_in_chunk();
+        self.write_in_chunk()?;
 
         Ok(())
     }
