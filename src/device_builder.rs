@@ -1,5 +1,5 @@
 use crate::class::UsbClass;
-use crate::device::{DeviceConfig, UsbDevice};
+use crate::device::{DeviceConfig, IadMode, UsbDevice};
 use crate::usbcore::UsbCore;
 use crate::Result;
 
@@ -43,6 +43,7 @@ impl<U: UsbCore> UsbDeviceBuilder<U> {
                 self_powered: false,
                 supports_remote_wakeup: false,
                 max_power: 50,
+                iad_mode: IadMode::Auto,
             },
         }
     }
@@ -88,6 +89,11 @@ impl<U: UsbCore> UsbDeviceBuilder<U> {
         ///
         /// Default: `false`
         supports_remote_wakeup: bool,
+
+        /// Sets whether the device should generate interface association descriptors (IADs).
+        ///
+        /// Default: `Auto`
+        iad_mode: IadMode,
     }
 
     /// Sets the manufacturer name string descriptor.
